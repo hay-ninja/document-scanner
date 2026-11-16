@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Doc Scanner</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <main id="live" class="live">
+      <div id="stage" class="stage">
+        <div id="mirror" class="mirror">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+        </div>
+        <svg id="ring" class="ring" viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="ring-bg" cx="50" cy="50" r="40" />
+          <circle id="ringFg" class="ring-fg" cx="50" cy="50" r="40" />
+        </svg>
+        <div id="flash" class="flash"></div>
+        <div id="camMsg" class="cam-msg">Starting camera…</div>
+        <div id="hint" class="hint">Loading scanner…</div>
+      </div>
+
+      <nav class="modes" id="modes">
+        <button data-mode="single"><kbd>1</kbd> Single page</button>
+        <button data-mode="multi"><kbd>2</kbd> Multi-page</button>
+        <button data-mode="area"><kbd>3</kbd> Custom area</button>
+      </nav>
+
+      <section id="multiBar" class="multi-bar hidden">
+        <div id="strip" class="strip"></div>
+        <div class="multi-actions">
+          <span id="pageCount" class="muted">No pages yet</span>
+          <div class="chips format-chips"></div>
+          <label class="check ocr-wrap"><input type="checkbox" class="ocr-chk" /> Searchable text</label>
+          <button id="multiClear" class="btn">Clear</button>
+          <button id="multiSave" class="btn primary">Finish &amp; save <kbd>Enter</kbd></button>
+        </div>
+      </section>
+
+      <section class="settings">
+        <label class="slider">☀ Light <input type="range" id="brightness" min="30" max="100" /></label>
+        <label class="slider">Warmth <input type="range" id="warmth" min="0" max="100" /></label>
+        <label class="check"><input type="checkbox" id="autoChk" /> Auto-capture</label>
+        <label class="check"><input type="checkbox" id="mirrorChk" /> Mirror view</label>
+        <select id="cameraSel" class="select" title="Camera"></select>
+        <button id="captureBtn" class="btn">Capture <kbd>Space</kbd></button>
+        <button id="fullscreenBtn" class="btn">Fullscreen</button>
+        <button id="historyBtn" class="btn">History <kbd>H</kbd></button>
+        <button id="helpBtn" class="btn" title="Keyboard shortcuts">?</button>
+      </section>
+    </main>
+
+    <div id="review" class="review hidden">
+      <div class="review-main" id="reviewMain">
+        <canvas id="reviewCanvas" class="doc"></canvas>
+        <canvas id="cornerCanvas" class="corner-canvas hidden"></canvas>
+        <div id="reviewSpin" class="spin hidden"></div>
+      </div>
+      <aside class="review-side">
+        <h2 id="reviewTitle">Review</h2>
+        <div class="group">
+          <div class="label">Filter <kbd>F</kbd></div>
+          <div class="chips" id="filterChips"></div>
+        </div>
+        <div class="group">
+          <div class="label">Adjust</div>
+          <div class="row">
+            <button id="rotL" class="btn" title="Rotate left (Shift+R)">⟲ Left</button>
+            <button id="rotR" class="btn" title="Rotate right (R)">⟳ Right <kbd>R</kbd></button>
+          </div>
+          <button id="cornersBtn" class="btn wide">Adjust corners <kbd>C</kbd></button>
+        </div>
+        <div class="group" id="saveGroup">
+          <div class="label">Save as</div>
+          <div class="chips format-chips"></div>
+          <label class="check ocr-wrap"><input type="checkbox" class="ocr-chk" /> Searchable text (OCR)</label>
+        </div>
+        <div class="actions" id="reviewActions"></div>
+      </aside>
+    </div>
+
+    <div id="historyPanel" class="panel hidden">
+      <div class="panel-card">
+        <div class="panel-head">
+          <h2>Recent scans</h2>
+          <button class="btn" data-close>Close <kbd>Esc</kbd></button>
+        </div>
+        <p class="muted small">Last 20 scans are kept in this browser only. "Save again" uses the format picked below.</p>
+        <div class="row"><div class="chips format-chips"></div><label class="check ocr-wrap"><input type="checkbox" class="ocr-chk" /> Searchable text</label></div>
+        <div id="historyList" class="history-list"></div>
+        <div class="panel-foot"><button id="historyClear" class="btn danger">Clear all</button></div>
+      </div>
+    </div>
+
+    <div id="helpPanel" class="panel hidden">
+      <div class="panel-card narrow">
+        <div class="panel-head">
+          <h2>Keyboard shortcuts</h2>
+          <button class="btn" data-close>Close <kbd>Esc</kbd></button>
+        </div>
+        <table class="keys">
+          <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>Single / Multi-page / Custom area</td></tr>
+          <tr><td><kbd>Space</kbd></td><td>Capture now</td></tr>
+          <tr><td><kbd>Enter</kbd></td><td>Save · finish multi-page · capture custom area</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Back / discard / clear selection</td></tr>
+          <tr><td><kbd>R</kbd> / <kbd>Shift</kbd>+<kbd>R</kbd></td><td>Rotate right / left</td></tr>
+          <tr><td><kbd>F</kbd></td><td>Cycle filter</td></tr>
+          <tr><td><kbd>C</kbd></td><td>Adjust corners</td></tr>
+          <tr><td><kbd>Del</kbd></td><td>Delete page (multi-page review)</td></tr>
+          <tr><td><kbd>H</kbd></td><td>History</td></tr>
+          <tr><td><kbd>A</kbd></td><td>Toggle auto-capture</td></tr>
+        </table>
+        <p class="muted small">Tip: turn the room lights down a bit and hold the page 30–50 cm from the screen, all four corners in view.</p>
+      </div>
+    </div>
+
+    <div id="busy" class="busy hidden"><div class="busy-card"><div class="spin"></div><div id="busyText">Working…</div></div></div>
+    <div id="toasts" class="toasts"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

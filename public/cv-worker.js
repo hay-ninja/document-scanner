@@ -200,7 +200,19 @@ function warp(image, corners, targetLong) {
   const M = CV.getPerspectiveTransform(s, d);
   const dst = new CV.Mat();
   CV.warpPerspective(src, dst, M, new CV.Size(W, H), CV.INTER_CUBIC, CV.BORDER_REPLICATE, new CV.Scalar());
-  const out = toImageData(dst);
+  // trim a hair off every edge so no background sliver survives slightly-loose corners
+  const inset = Math.round(Math.min(W, H) * 0.007);
+  let out;
+  if (inset > 0 && W > inset * 4 && H > inset * 4) {
+    const roi = dst.roi(new CV.Rect(inset, inset, W - inset * 2, H - inset * 2));
+    const cropped = new CV.Mat();
+    roi.copyTo(cropped); // copyTo gives a continuous buffer (clone of an ROI may keep the parent stride)
+    out = toImageData(cropped);
+    roi.delete();
+    cropped.delete();
+  } else {
+    out = toImageData(dst);
+  }
   [src, s, d, M, dst].forEach((m) => m.delete());
   return out;
 }
