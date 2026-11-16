@@ -62,14 +62,22 @@
           <button id="fullscreenBtn" class="btn small">Fullscreen</button>
         </section>
 
+        <section class="card camera-card">
+          <div class="card-title">Camera <span id="camRes" class="res"></span></div>
+          <select id="cameraSel" class="select" title="Camera"></select>
+          <div id="camControls" class="cam-controls"></div>
+          <div class="row">
+            <button id="camReset" class="btn small hidden">Reset to auto</button>
+          </div>
+        </section>
+
         <section class="card more-card">
           <div class="card-title">More</div>
           <div class="row">
             <button id="historyBtn" class="btn">History <kbd>H</kbd></button>
-            <button id="helpBtn" class="btn">Shortcuts <kbd>?</kbd></button>
+            <button id="helpBtn" class="btn">Tips &amp; keys <kbd>?</kbd></button>
           </div>
           <label class="switch"><input type="checkbox" id="mirrorChk" /><span class="track"></span>Mirror camera view</label>
-          <select id="cameraSel" class="select" title="Camera"></select>
         </section>
       </div>
     </main>
@@ -94,6 +102,9 @@
         <section class="card">
           <div class="card-title">Look <kbd>F</kbd></div>
           <div class="chips" id="filterChips"></div>
+          <label class="slider ink-slider" title="Darkens faint pencil / light ink. Lower it if the page looks too heavy.">
+            <span>Ink darkness</span><input type="range" id="inkRange" min="0" max="100" />
+          </label>
         </section>
 
         <section class="card">
@@ -140,9 +151,18 @@
     <div id="helpPanel" class="panel hidden">
       <div class="panel-card narrow">
         <div class="panel-head">
-          <h2>Keyboard shortcuts</h2>
+          <h2>Getting a sharp scan</h2>
           <button class="btn" data-close>Close <kbd>Esc</kbd></button>
         </div>
+        <ul class="tips">
+          <li><b>Distance:</b> hold the page about 35–50 cm from the screen, so it fills ~70–80% of the camera view with all 4 corners visible. Closer than that and most laptop webcams (fixed focus) go blurry.</li>
+          <li><b>Hold it flat &amp; square</b> to the camera, fingers on the edges/margins only. Rest your elbows on the desk — steadier hands = sharper text.</li>
+          <li><b>Washed out / white blobs?</b> Lower <i>Brightness</i> or the camera <i>Exposure</i>, or tilt the page slightly so the screen glare moves off it.</li>
+          <li><b>Room light behind you</b> (ceiling lamp, window) reflects off the paper — face away from it or turn it off and let the screen light the page.</li>
+          <li><b>Pencil</b> is the hardest case: raise <i>Ink darkness</i> in the review screen, or use pen.</li>
+          <li><b>Want much sharper scans?</b> Use your phone as the webcam (Windows Phone Link → "Use as a connected camera", or apps like Camo / DroidCam) and pick it in the Camera dropdown — phone cameras have autofocus and far more detail.</li>
+        </ul>
+        <h3 class="keys-title">Keyboard shortcuts</h3>
         <table class="keys">
           <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>Single / Multi-page / Custom area</td></tr>
           <tr><td><kbd>Space</kbd></td><td>Capture now</td></tr>
@@ -157,7 +177,6 @@
           <tr><td><kbd>H</kbd></td><td>History</td></tr>
           <tr><td><kbd>A</kbd></td><td>Toggle auto-capture</td></tr>
         </table>
-        <p class="muted small">Tip: hold the page 30–50 cm from the screen with all four corners in view. A darker background behind it helps.</p>
       </div>
     </div>
 

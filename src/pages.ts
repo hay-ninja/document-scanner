@@ -3,8 +3,8 @@ import type { FilterName, OutPage, Page, Quad, Rotation } from './types';
 
 let nextId = 1;
 
-export function newPage(source: ImageData, corners: Quad, filter: FilterName): Page {
-  return { id: `p${Date.now().toString(36)}${nextId++}`, source, corners, filter, rotation: 0 };
+export function newPage(source: ImageData, corners: Quad, filter: FilterName, ink = 0.5): Page {
+  return { id: `p${Date.now().toString(36)}${nextId++}`, source, corners, filter, ink, rotation: 0 };
 }
 
 export function fullQuad(w: number, h: number): Quad {
@@ -38,12 +38,12 @@ async function doRender(page: Page): Promise<HTMLCanvasElement> {
     page.warped = await cvCall<ImageData>('warp', { image: page.source, corners: page.corners });
     page.filtered = undefined;
   }
-  if (!page.filtered || page.filtered.filter !== page.filter) {
+  if (!page.filtered || page.filtered.filter !== page.filter || page.filtered.ink !== page.ink) {
     const data =
       page.filter === 'original'
         ? page.warped
-        : await cvCall<ImageData>('filter', { image: page.warped, filter: page.filter });
-    page.filtered = { filter: page.filter, data };
+        : await cvCall<ImageData>('filter', { image: page.warped, filter: page.filter, strength: page.ink });
+    page.filtered = { filter: page.filter, ink: page.ink, data };
   }
   page.result = rotateToCanvas(page.filtered.data, page.rotation);
   return page.result;

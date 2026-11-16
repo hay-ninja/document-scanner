@@ -50,8 +50,9 @@ const camera = new Camera(video);
 /* State                                                               */
 /* ------------------------------------------------------------------ */
 
-const HOLD_MS = 1000; // how long the page must be still before auto-capture
-const STABLE_EPS = 0.014; // max corner movement between detections (fraction of frame)
+const HOLD_MS = 850; // how long the page must stay roughly put before auto-capture
+const STABLE_TOL = 0.03; // corners may wander this much (fraction of frame) and still count as "still"
+const BURST_FRAMES = 4; // frames grabbed per capture; the sharpest one wins
 const DETECT_WIDTH = 640;
 const DETECT_INTERVAL = 50;
 
@@ -68,6 +69,9 @@ const state = {
 const live = {
   quad: null as Quad | null, // smoothed, normalised 0..1
   raw: null as Quad | null, // latest raw detection, normalised
+  anchor: null as Quad | null, // where the page was when the current hold started
+  stats: null as null | { clipped: number; brightness: number; area: number },
+  capturing: false,
   lastSeen: 0,
   stableSince: 0,
   progress: 0,
@@ -287,7 +291,9 @@ async function startCamera(deviceId?: string) {
     await camera.start(deviceId);
     camMsg.classList.add('hidden');
     onVideoSize();
+    await applySavedCamControls();
     await populateCameras();
+    renderCamControls();
   } catch (err: any) {
     const denied = err?.name === 'NotAllowedError';
     camMsg.textContent = denied
@@ -295,6 +301,56 @@ async function startCamera(deviceId?: string) {
       : `Could not start the camera (${err?.message || err}). Is another app using it?`;
   }
 }
+
+/* ---------- webcam image controls (exposure, contrast, focus…) ---------- */
+
+async function applySavedCamControls() {
+  const avail = new Set(camera.controls().map((c) => c.name));
+  for (const [name, v] of Object.entries(settings.camControls)) {
+    if (avail.has(name)) await camera.setControl(name, v).catch(() => {});
+  }
+}
+
+function renderCamControls() {
+  $('#camRes').textContent = camera.ready ? `· ${camera.width}×${camera.height}` : '';
+  const box = $('#camControls');
+  box.innerHTML = '';
+  const ctrls = camera.controls();
+  for (const c of ctrls) {
+    const label = document.createElement('label');
+    label.className = 'slider';
+    const span = document.createElement('span');
+    span.textContent = c.label;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(c.min);
+    input.max = String(c.max);
+    input.step = String(c.step);
+    input.value = String(settings.camControls[c.name] ?? c.value);
+    let pending = 0;
+    input.addEventListener('input', () => {
+      cancelAnimationFrame(pending);
+      pending = requestAnimationFrame(() => {
+        const v = Number(input.value);
+        settings.camControls[c.name] = v;
+        saveSettings();
+        camera.setControl(c.name, v).catch((err) => console.warn('camera control', c.name, err));
+      });
+    });
+    label.append(span, input);
+    box.appendChild(label);
+  }
+  $('#camReset').classList.toggle('hidden', !ctrls.length);
+}
+
+$('#camReset').addEventListener('click', async () => {
+  settings.camControls = {};
+  saveSettings();
+  await camera.resetAuto();
+  // a fresh stream is the most reliable way back to the driver's defaults
+  await startCamera(settings.deviceId || undefined);
+  toast('Camera back to automatic settings');
+});
 
 async function populateCameras() {
   const cams = await Camera.list();
@@ -319,7 +375,14 @@ cameraSel.addEventListener('change', async () => {
 /* ------------------------------------------------------------------ */
 
 function canDetect() {
-  return state.cvLoaded && camera.ready && state.view === 'live' && state.mode !== 'area' && !anyPanelOpen() && !state.busy;
+  return state.cvLoaded && camera.ready && state.view === 'live' && state.mode !== 'area' && !anyPanelOpen() && !state.busy && !live.capturing;
+}
+
+interface DetectResult {
+  corners: Pt[];
+  clipped: number;
+  brightness: number;
+  area: number;
 }
 
 async function detectTick(now: number) {
@@ -328,8 +391,8 @@ async function detectTick(now: number) {
   live.lastDetect = now;
   try {
     const img = camera.grab(DETECT_WIDTH);
-    const res = await cvCall<{ corners: Pt[] } | null>('detect', { image: img });
-    if (canDetect()) handleDetection(res?.corners ?? null, img.width, img.height);
+    const res = await cvCall<DetectResult | null>('detect', { image: img });
+    if (canDetect()) handleDetection(res, img.width, img.height);
   } catch (err) {
     console.warn('detect failed', err);
   } finally {
@@ -337,18 +400,25 @@ async function detectTick(now: number) {
   }
 }
 
-function handleDetection(corners: Pt[] | null, w: number, h: number) {
+function handleDetection(res: DetectResult | null, w: number, h: number) {
   const now = performance.now();
-  if (corners) {
-    const q = corners.map((p) => ({ x: p.x / w, y: p.y / h })) as Quad;
-    const move = live.raw ? maxDist(q, live.raw) : 1;
+  if (res) {
+    const q = res.corners.map((p) => ({ x: p.x / w, y: p.y / h })) as Quad;
     live.raw = q;
     live.lastSeen = now;
-    if (move > STABLE_EPS) live.stableSince = now;
+    live.stats = { clipped: res.clipped, brightness: res.brightness, area: res.area };
+    // hand-held pages always jiggle a little: only restart the hold if the page drifts
+    // more than STABLE_TOL away from where the hold started
+    if (!live.anchor || maxDist(q, live.anchor) > STABLE_TOL) {
+      live.anchor = q;
+      live.stableSince = now;
+    }
     live.quad = live.quad && maxDist(live.quad, q) < 0.06 ? lerpQuad(live.quad, q, 0.55) : q;
-  } else if (now - live.lastSeen > 300) {
+  } else if (now - live.lastSeen > 400) {
     live.quad = null;
     live.raw = null;
+    live.anchor = null;
+    live.stats = null;
     live.stableSince = now;
   }
 
@@ -374,10 +444,18 @@ function updateHint() {
     msg = live.area ? 'Press Enter to capture this area · Esc to clear' : 'Drag a box over what you want to scan';
   } else if (state.retakeIndex !== null) {
     msg = `Retaking page ${state.retakeIndex + 1} — hold up the page`;
+  } else if (live.capturing) {
+    msg = 'Capturing — keep it there…';
   } else if (!live.armed) {
     msg = state.mode === 'multi' ? `Page ${state.pages.length} captured ✓ — swap in the next page` : 'Captured ✓';
   } else if (!live.quad) {
     msg = 'Hold the page up with all 4 corners in view';
+  } else if (live.stats && live.stats.area < 0.2) {
+    msg = 'Bring the page closer — it should fill most of the view';
+  } else if (live.stats && live.stats.clipped > 0.45) {
+    msg = 'Page looks washed out — lower Brightness or camera Exposure';
+  } else if (live.stats && live.stats.brightness < 0.33) {
+    msg = 'Too dark — turn the screen light up';
   } else if (!settings.autoCapture) {
     msg = 'Page found — press Space to capture';
   } else {
@@ -453,49 +531,96 @@ function frame(now: number) {
 /* Capture                                                             */
 /* ------------------------------------------------------------------ */
 
-function capture(manual: boolean) {
-  if (state.view !== 'live' || !camera.ready || anyPanelOpen() || state.busy) return;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Grab a short burst of frames and keep the sharpest one (least motion blur / best focus).
+ * Each frame gets its own page detection so the corners match that exact frame.
+ * With fixedNorm (custom area) detection is skipped.
+ */
+async function burst(fallback: Quad | null, fixedNorm?: Quad): Promise<{ img: ImageData; corners: Quad; found: boolean }> {
+  let best: { img: ImageData; corners: Quad; found: boolean; score: number } | null = null;
+  for (let i = 0; i < BURST_FRAMES; i++) {
+    if (i) await sleep(70);
+    const { full, small } = camera.grabPair(DETECT_WIDTH);
+    let q: Quad | null = fixedNorm ?? null;
+    if (!q) {
+      try {
+        const det = await cvCall<DetectResult | null>('detect', { image: small });
+        if (det) q = det.corners.map((p) => ({ x: p.x / small.width, y: p.y / small.height })) as Quad;
+      } catch {
+        /* ignore */
+      }
+      // a detection that jumped far from where the page was is probably wrong
+      if (q && fallback && maxDist(q, fallback) > 0.08) q = null;
+    }
+    const found = !!q;
+    const use = q ?? fallback;
+    const corners = use
+      ? (use.map((p) => ({ x: p.x * full.width, y: p.y * full.height })) as Quad)
+      : fullQuad(full.width, full.height);
+    let sharp = 0;
+    try {
+      sharp = await cvCall<number>('sharpness', { image: full, corners });
+    } catch {
+      /* ignore */
+    }
+    const score = sharp * (found ? 1 : 0.6);
+    if (!best || score > best.score) best = { img: full, corners, found: found || !!fallback, score };
+  }
+  return best!;
+}
+
+async function capture(manual: boolean) {
+  if (live.capturing || state.view !== 'live' || !camera.ready || anyPanelOpen() || state.busy) return;
   if (state.mode === 'area') {
     captureArea();
     return;
   }
-  const img = camera.grab();
-  const W = img.width;
-  const H = img.height;
   const q = live.raw ?? live.quad;
-  const corners = q ? (q.map((p) => ({ x: p.x * W, y: p.y * H })) as Quad) : fullQuad(W, H);
-  if (manual && !q) toast('No page outline found — captured the whole frame');
-  doFlash();
   const now = performance.now();
+  live.capturing = true;
   live.armed = false;
   live.capturedQuad = q;
   live.lastCaptureAt = now;
   live.stableSince = now;
   live.progress = 0;
-  const page = newPage(img, corners, settings.filter);
-  if (state.mode === 'multi') addMultiPage(page);
-  else openReview(page, 'single');
+  try {
+    const shot = await burst(q);
+    if (manual && !shot.found) toast('No page outline found — captured the whole frame');
+    doFlash();
+    live.lastCaptureAt = performance.now();
+    const page = newPage(shot.img, shot.corners, settings.filter, settings.ink);
+    if (state.mode === 'multi') addMultiPage(page);
+    else openReview(page, 'single');
+  } finally {
+    live.capturing = false;
+  }
 }
 
-function captureArea() {
+async function captureArea() {
   const r = live.area;
   if (!r) {
     toast('Drag a box over the camera view first');
     return;
   }
-  const img = camera.grab();
-  const W = img.width;
-  const H = img.height;
-  const x0 = Math.min(r.x0, r.x1) * W, x1 = Math.max(r.x0, r.x1) * W;
-  const y0 = Math.min(r.y0, r.y1) * H, y1 = Math.max(r.y0, r.y1) * H;
-  const corners: Quad = [
+  if (live.capturing) return;
+  const x0 = Math.min(r.x0, r.x1), x1 = Math.max(r.x0, r.x1);
+  const y0 = Math.min(r.y0, r.y1), y1 = Math.max(r.y0, r.y1);
+  const norm: Quad = [
     { x: x0, y: y0 },
     { x: x1, y: y0 },
     { x: x1, y: y1 },
     { x: x0, y: y1 },
   ];
-  doFlash();
-  openReview(newPage(img, corners, settings.filter), 'single');
+  live.capturing = true;
+  try {
+    const shot = await burst(null, norm);
+    doFlash();
+    openReview(newPage(shot.img, shot.corners, settings.filter, settings.ink), 'single');
+  } finally {
+    live.capturing = false;
+  }
 }
 
 /* ---------- custom-area selection on the live view ---------- */
@@ -768,7 +893,24 @@ function renderFilterChips() {
     b.onclick = () => setFilter(f.id);
     box.appendChild(b);
   }
+  const ink = $<HTMLInputElement>('#inkRange');
+  ink.value = String(Math.round((review.page?.ink ?? settings.ink) * 100));
+  ink.disabled = review.page?.filter === 'original';
+  (ink.parentElement as HTMLElement).style.opacity = ink.disabled ? '0.45' : '1';
 }
+
+let inkTimer = 0;
+$<HTMLInputElement>('#inkRange').addEventListener('input', (e) => {
+  const v = Number((e.target as HTMLInputElement).value) / 100;
+  clearTimeout(inkTimer);
+  inkTimer = window.setTimeout(() => {
+    if (!review.page) return;
+    review.page.ink = v;
+    settings.ink = v;
+    saveSettings();
+    refreshReview();
+  }, 120);
+});
 
 async function refreshReview() {
   const page = review.page;

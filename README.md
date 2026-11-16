@@ -47,16 +47,22 @@ npm start
 
 ## Tips
 
-- Hold the page 30–50 cm from the screen with all four corners visible. A darker background behind the page helps detection.
-- Laptop webcams are about 720p–1080p, so scans look clean but tiny print can soften. Fill the frame with the page.
+- **Distance:** hold the page about 35–50 cm from the screen, so it fills about 70–80% of the view with all four corners visible. Most laptop webcams are fixed-focus and blur anything closer.
+- **Steadiness:** rest your elbows on the desk. Capture takes a short burst of frames and keeps the sharpest.
+- **Washed out:** lower **Brightness** or the camera **Exposure** (in the Camera card, if your webcam supports it), or tilt the page to move the glare.
+- **Pencil:** raise **Ink darkness** in the review screen.
+- **Much sharper scans:** use your phone as the webcam (Windows Phone Link → "Use as a connected camera", or Camo / DroidCam) and pick it from the Camera dropdown.
+- **Resolution:** laptop webcams are about 720p–1080p. The Camera card shows what you're actually getting.
 
 ## How it works
 
 - **OpenCV.js** (WASM) in a web worker ([public/cv-worker.js](public/cv-worker.js)) handles detection, warp, and filters:
-  - **Detection**: Canny edges, plus a bright-region pass and an adaptive-threshold pass. It picks the largest convex quad.
-  - **Auto-capture**: corners are smoothed and checked for stability before capturing.
+  - **Detection**: three contour passes (edges, bright region, adaptive threshold) plus a straight-line pass (Hough lines combined into quads).
+    Every candidate is scored by how much of its outline sits on a real edge with brighter paper inside than outside.
+    That keeps it working when fingers cover an edge, the paper has a torn spiral edge, or the background is bright.
+  - **Auto-capture**: the page may wobble within about 3% of the frame and still count as held still. Capture grabs 4 frames and keeps the sharpest (Laplacian variance).
   - **Warp**: a perspective transform to a flat rectangle, upscaled to about 2200 px.
-  - **Magic color**: divides out the estimated paper background so the paper turns uniformly white, then stretches levels, boosts saturation, and sharpens.
+  - **Magic color**: removes colour noise, divides out the estimated paper background so the paper turns uniformly white, then applies an ink-darkness tone curve, boosts real colour, and sharpens.
 - **pdf-lib** builds the PDFs. **tesseract.js** does the OCR (English). Its language data downloads once from a CDN, then gets cached.
 - **idb-keyval** (IndexedDB) stores the history.
 - **Vite + TypeScript**, no framework.

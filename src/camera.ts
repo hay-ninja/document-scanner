@@ -1,3 +1,12 @@
+export interface CamControl {
+  name: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+}
+
 export class Camera {
   stream: MediaStream | null = null;
   private fullCanvas = document.createElement('canvas');
@@ -13,7 +22,8 @@ export class Camera {
       await this.video.play();
       return;
     }
-    const size = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    // ask for more than most laptop cams have; the browser picks the closest real mode
+    const size = { width: { ideal: 2560 }, height: { ideal: 1440 } };
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -39,6 +49,62 @@ export class Camera {
     } catch {
       /* not supported */
     }
+  }
+
+  /** Image controls the webcam exposes (exposure, contrast, focus…), with current values. */
+  controls(): CamControl[] {
+    const track = this.stream?.getVideoTracks()[0];
+    if (!track?.getCapabilities) return [];
+    const caps: any = track.getCapabilities();
+    const cur: any = track.getSettings();
+    const out: CamControl[] = [];
+    const add = (name: string, label: string) => {
+      const c = caps[name];
+      if (!c || typeof c.min !== 'number' || typeof c.max !== 'number' || c.max <= c.min) return;
+      out.push({ name, label, min: c.min, max: c.max, step: c.step || (c.max - c.min) / 100, value: cur[name] ?? (c.min + c.max) / 2 });
+    };
+    add('exposureCompensation', 'Exposure');
+    if (!caps.exposureCompensation && caps.exposureMode?.includes?.('manual')) add('exposureTime', 'Exposure');
+    add('brightness', 'Brightness');
+    add('contrast', 'Contrast');
+    add('sharpness', 'Sharpness');
+    if (caps.focusMode?.includes?.('manual')) add('focusDistance', 'Focus');
+    return out;
+  }
+
+  async setControl(name: string, value: number) {
+    const track = this.stream?.getVideoTracks()[0];
+    if (!track) return;
+    const adv: any = { [name]: value };
+    if (name === 'exposureTime') adv.exposureMode = 'manual';
+    if (name === 'focusDistance') adv.focusMode = 'manual';
+    await track.applyConstraints({ advanced: [adv] });
+  }
+
+  /** Back to automatic exposure / focus. */
+  async resetAuto() {
+    const track = this.stream?.getVideoTracks()[0];
+    if (!track?.getCapabilities) return;
+    const caps: any = track.getCapabilities();
+    const adv: any = {};
+    if (caps.exposureMode?.includes?.('continuous')) adv.exposureMode = 'continuous';
+    if (caps.focusMode?.includes?.('continuous')) adv.focusMode = 'continuous';
+    if (Object.keys(adv).length) await track.applyConstraints({ advanced: [adv] }).catch(() => {});
+  }
+
+  /** Full-res frame plus a downscaled copy of the *same* frame (for detection). */
+  grabPair(maxWidth: number): { full: ImageData; small: ImageData } {
+    const full = this.grab();
+    const scale = Math.min(1, maxWidth / full.width);
+    const w = Math.round(full.width * scale), h = Math.round(full.height * scale);
+    const c = this.smallCanvas;
+    if (c.width !== w || c.height !== h) {
+      c.width = w;
+      c.height = h;
+    }
+    const ctx = c.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(this.fullCanvas, 0, 0, w, h);
+    return { full, small: ctx.getImageData(0, 0, w, h) };
   }
 
   stop() {

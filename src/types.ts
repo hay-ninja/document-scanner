@@ -12,10 +12,12 @@ export interface Page {
   /** Page corners in source pixel coordinates: tl, tr, br, bl. */
   corners: Quad;
   filter: FilterName;
+  /** Ink darkness 0..1 for the cleanup filters. */
+  ink: number;
   rotation: Rotation;
   /** Flattened, unfiltered page (dropped when not being edited, to save memory). */
   warped?: ImageData;
-  filtered?: { filter: FilterName; data: ImageData };
+  filtered?: { filter: FilterName; ink: number; data: ImageData };
   /** Final rendered page (filtered + rotated). */
   result?: HTMLCanvasElement;
   thumb?: string;

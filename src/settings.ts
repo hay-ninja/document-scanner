@@ -9,6 +9,8 @@ export interface Settings {
   format: Format;
   ocr: boolean;
   deviceId: string;
+  ink: number;
+  camControls: Record<string, number>;
 }
 
 const KEY = 'docscan-settings';
@@ -21,6 +23,8 @@ const defaults: Settings = {
   format: 'pdf',
   ocr: true,
   deviceId: '',
+  ink: 0.5,
+  camControls: {},
 };
 
 function load(): Settings {

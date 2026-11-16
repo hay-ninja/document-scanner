@@ -6,3 +6,4 @@ public/vendor/
 # never commit scans
 *.pdf
 scans/
+public/_test/
