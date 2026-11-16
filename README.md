@@ -60,7 +60,7 @@ npm start
   - **Detection**: three contour passes (edges, bright region, adaptive threshold) plus a straight-line pass (Hough lines combined into quads).
     Every candidate is scored by how much of its outline sits on a real edge with brighter paper inside than outside.
     That keeps it working when fingers cover an edge, the paper has a torn spiral edge, or the background is bright.
-  - **Auto-capture**: the page may wobble within about 3% of the frame and still count as held still. Capture grabs 4 frames and keeps the sharpest (Laplacian variance).
+  - **Flash scan**: once the page has been held within about 3% of the frame for 1.2 s, the screen flashes colours while it tracks the page (cancelling if it moves). It then turns white so exposure settles, grabs 6 frames, and merges the sharpest 4: each is aligned by corner homography plus ECC refinement, then averaged to cut webcam grain. `Shift+Space` is a quick capture without the flash.
   - **Warp**: a perspective transform to a flat rectangle, upscaled to about 2200 px.
   - **Magic color**: removes colour noise, divides out the estimated paper background so the paper turns uniformly white, then applies an ink-darkness tone curve, boosts real colour, and sharpens.
 - **pdf-lib** builds the PDFs. **tesseract.js** does the OCR (English). Its language data downloads once from a CDN, then gets cached.

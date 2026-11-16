@@ -164,7 +164,7 @@ function demoStream(): MediaStream {
   const t0 = performance.now();
   const draw = () => {
     const t = (performance.now() - t0) / 1000;
-    const cycle = 6;
+    const cycle = 9;
     const phase = t % cycle;
     const pageNo = Math.floor(t / cycle) + 1;
     const g = ctx.createLinearGradient(0, 0, 1280, 720);
@@ -176,7 +176,7 @@ function demoStream(): MediaStream {
     ctx.beginPath();
     ctx.arc(1050, 180, 140, 0, Math.PI * 2);
     ctx.fill();
-    if (phase < 4.6) {
+    if (phase < 7.6) {
       const still = phase > 1 ? 0.15 : 1;
       ctx.save();
       ctx.translate(640 + Math.sin(t * 2) * 6 * still, 370 + Math.cos(t * 1.7) * 5 * still);

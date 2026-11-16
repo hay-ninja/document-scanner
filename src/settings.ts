@@ -10,6 +10,7 @@ export interface Settings {
   ocr: boolean;
   deviceId: string;
   ink: number;
+  flashScan: boolean;
   camControls: Record<string, number>;
 }
 
@@ -24,6 +25,7 @@ const defaults: Settings = {
   ocr: true,
   deviceId: '',
   ink: 0.5,
+  flashScan: true,
   camControls: {},
 };
 

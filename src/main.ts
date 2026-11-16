@@ -50,7 +50,7 @@ const camera = new Camera(video);
 /* State                                                               */
 /* ------------------------------------------------------------------ */
 
-const HOLD_MS = 850; // how long the page must stay roughly put before auto-capture
+const HOLD_MS = 1200; // how long the page must stay roughly put before auto-capture
 const STABLE_TOL = 0.03; // corners may wander this much (fraction of frame) and still count as "still"
 const BURST_FRAMES = 4; // frames grabbed per capture; the sharpest one wins
 const DETECT_WIDTH = 640;
@@ -168,6 +168,7 @@ function syncControls() {
   $<HTMLInputElement>('#brightness').value = String(settings.brightness);
   $<HTMLInputElement>('#warmth').value = String(settings.warmth);
   $<HTMLInputElement>('#autoChk').checked = settings.autoCapture;
+  $<HTMLInputElement>('#flashChk').checked = settings.flashScan;
   $<HTMLInputElement>('#mirrorChk').checked = settings.mirror;
   mirrorEl.classList.toggle('mirrored', settings.mirror);
   for (const box of $$('.format-chips')) {
@@ -200,6 +201,10 @@ $<HTMLInputElement>('#brightness').addEventListener('input', (e) => {
 $<HTMLInputElement>('#warmth').addEventListener('input', (e) => {
   settings.warmth = Number((e.target as HTMLInputElement).value);
   applyLight();
+  saveSettings();
+});
+$<HTMLInputElement>('#flashChk').addEventListener('change', (e) => {
+  settings.flashScan = (e.target as HTMLInputElement).checked;
   saveSettings();
 });
 $<HTMLInputElement>('#autoChk').addEventListener('change', (e) => {
@@ -249,7 +254,7 @@ document.addEventListener('change', (e) => {
 /* ------------------------------------------------------------------ */
 
 const MODE_DESC: Record<Mode, string> = {
-  single: 'Hold one page up to the camera. It captures by itself once you hold still, then you can copy or save it.',
+  single: 'Hold one page up to the camera. Once it is outlined and you hold still, the screen flashes and it scans — then copy or save it.',
   multi: 'Scan several pages in a row: each is captured when still, then swap in the next. Copy pages one by one, or finish to save them together.',
   area: 'Drag a box over the camera view to scan just that region (resize from its corners), then press Enter.',
 };
@@ -538,7 +543,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Each frame gets its own page detection so the corners match that exact frame.
  * With fixedNorm (custom area) detection is skipped.
  */
-async function burst(fallback: Quad | null, fixedNorm?: Quad): Promise<{ img: ImageData; corners: Quad; found: boolean }> {
+async function burst(fallback: Quad | null, fixedNorm?: Quad): Promise<Shot> {
   let best: { img: ImageData; corners: Quad; found: boolean; score: number } | null = null;
   for (let i = 0; i < BURST_FRAMES; i++) {
     if (i) await sleep(70);
@@ -571,7 +576,136 @@ async function burst(fallback: Quad | null, fixedNorm?: Quad): Promise<{ img: Im
   return best!;
 }
 
-async function capture(manual: boolean) {
+/* ---------- flash scan sequence ---------- */
+
+const FLASH_COLORS = ['#00e5ff', '#ff2bd6', '#fff200', '#2bff88', '#4d7cff', '#ff8a00', '#b84dff'];
+const FLASH_STEP_MS = 190;
+const SETTLE_MS = 420; // let the webcam's auto-exposure settle on white before grabbing
+const SEQ_FRAMES = 6;
+const scanFx = $('#scanFx');
+const scanFxText = $('#scanFxText');
+const scanFxBar = $('#scanFxBar');
+
+type Shot = { img: ImageData; corners: Quad; found: boolean; merged?: number };
+
+function fx(color: string | null, text?: string, progress?: number) {
+  if (color === null) {
+    scanFx.classList.add('hidden');
+    return;
+  }
+  scanFx.classList.remove('hidden');
+  scanFx.style.backgroundColor = color;
+  if (text !== undefined) scanFxText.textContent = text;
+  if (progress !== undefined) scanFxBar.style.width = `${Math.round(progress * 100)}%`;
+}
+
+async function detectNorm(small: ImageData): Promise<Quad | null> {
+  try {
+    const det = await cvCall<DetectResult | null>('detect', { image: small });
+    return det ? (det.corners.map((p) => ({ x: p.x / small.width, y: p.y / small.height })) as Quad) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ID.me-style scan: flash bright colours while tracking the page (aborts if it moves or
+ * disappears), switch to white, let exposure settle, grab several frames, then merge the
+ * sharpest well-aligned ones. Returns null if aborted.
+ */
+async function scanSequence(fallback: Quad | null, fixedNorm?: Quad): Promise<Shot | null> {
+  const total = FLASH_COLORS.length * FLASH_STEP_MS + SETTLE_MS + SEQ_FRAMES * 110;
+  let elapsed = 0;
+  let anchor = fixedNorm ?? fallback;
+  let lostSince = 0;
+  try {
+    // 1) colour flashes + tracking
+    for (const color of FLASH_COLORS) {
+      const t0 = performance.now();
+      fx(color, 'Scanning — hold still', elapsed / total);
+      if (!fixedNorm) {
+        const q = await detectNorm(camera.grab(DETECT_WIDTH));
+        const now = performance.now();
+        if (!q) {
+          if (!lostSince) lostSince = now;
+          else if (now - lostSince > 500) return abortScan('Lost the page — keep all 4 corners in view');
+        } else {
+          lostSince = 0;
+          if (anchor && maxDist(q, anchor) > 0.07) return abortScan('Moved too much — hold still and try again');
+          anchor ??= q;
+        }
+      }
+      const spent = performance.now() - t0;
+      if (spent < FLASH_STEP_MS) await sleep(FLASH_STEP_MS - spent);
+      elapsed += FLASH_STEP_MS;
+    }
+
+    // 2) white light, let exposure settle
+    const white = getComputedStyle(document.documentElement).getPropertyValue('--light').trim() || '#fff';
+    fx(white, 'Capturing…', elapsed / total);
+    await sleep(SETTLE_MS);
+    elapsed += SETTLE_MS;
+
+    // 3) grab frames (each with its own detection + sharpness)
+    const frames: { img: ImageData; corners: Quad; norm: Quad | null; sharp: number }[] = [];
+    for (let i = 0; i < SEQ_FRAMES; i++) {
+      const { full, small } = camera.grabPair(DETECT_WIDTH);
+      let q: Quad | null = fixedNorm ?? (await detectNorm(small));
+      if (q && anchor && !fixedNorm && maxDist(q, anchor) > 0.09) q = null;
+      const use = q ?? anchor;
+      const corners = use
+        ? (use.map((p) => ({ x: p.x * full.width, y: p.y * full.height })) as Quad)
+        : fullQuad(full.width, full.height);
+      let sharp = 0;
+      try {
+        sharp = await cvCall<number>('sharpness', { image: full, corners });
+      } catch {
+        /* ignore */
+      }
+      frames.push({ img: full, corners, norm: q, sharp: q ? sharp : sharp * 0.6 });
+      elapsed += 110;
+      fx(white, 'Capturing…', elapsed / total);
+      await sleep(30);
+    }
+    fx(white, 'Merging frames…', 1);
+
+    // 4) merge the sharpest frames that agree on where the page is
+    frames.sort((a, b) => b.sharp - a.sharp);
+    const best = frames[0];
+    const group = frames
+      .filter((f) => f === best || (f.norm && best.norm ? maxDist(f.norm, best.norm) < 0.05 : !!fixedNorm))
+      .slice(0, 4);
+    let img = best.img;
+    let merged = 1;
+    if (group.length >= 2) {
+      try {
+        const r = await cvCall<{ image: ImageData; used: number }>('stack', {
+          frames: group.map((f) => ({ image: f.img, corners: f.corners })),
+        });
+        img = r.image;
+        merged = r.used;
+      } catch (err) {
+        console.warn('stack failed', err);
+      }
+    }
+    return { img, corners: best.corners, found: !!best.norm || !!fixedNorm || !!anchor, merged };
+  } finally {
+    fx(null);
+  }
+}
+
+function abortScan(msg: string): null {
+  fx(null);
+  toast(msg, true);
+  // give the user a moment before the hold starts counting again
+  const now = performance.now();
+  live.armed = true;
+  live.anchor = null;
+  live.stableSince = now + 700;
+  return null;
+}
+
+async function capture(manual: boolean, quick = false) {
   if (live.capturing || state.view !== 'live' || !camera.ready || anyPanelOpen() || state.busy) return;
   if (state.mode === 'area') {
     captureArea();
@@ -586,8 +720,13 @@ async function capture(manual: boolean) {
   live.stableSince = now;
   live.progress = 0;
   try {
-    const shot = await burst(q);
+    const shot = settings.flashScan && !quick ? await scanSequence(q) : await burst(q);
+    if (!shot) {
+      live.capturedQuad = null;
+      return;
+    }
     if (manual && !shot.found) toast('No page outline found — captured the whole frame');
+    if (shot.merged && shot.merged > 1) toast(`Merged ${shot.merged} frames for a cleaner scan`, 'ok');
     doFlash();
     live.lastCaptureAt = performance.now();
     const page = newPage(shot.img, shot.corners, settings.filter, settings.ink);
@@ -615,7 +754,8 @@ async function captureArea() {
   ];
   live.capturing = true;
   try {
-    const shot = await burst(null, norm);
+    const shot = settings.flashScan ? await scanSequence(null, norm) : await burst(null, norm);
+    if (!shot) return;
     doFlash();
     openReview(newPage(shot.img, shot.corners, settings.filter, settings.ink), 'single');
   } finally {
@@ -1388,7 +1528,7 @@ document.addEventListener('keydown', (e) => {
   if (k === '1') setMode('single');
   else if (k === '2') setMode('multi');
   else if (k === '3') setMode('area');
-  else if (k === ' ') capture(true);
+  else if (k === ' ') capture(true, e.shiftKey);
   else if (k === 'Enter') {
     if (state.mode === 'multi') saveMulti();
     else if (state.mode === 'area') captureArea();

@@ -23,6 +23,12 @@ self.onmessage = async (e) => {
         result = detect(payload.image);
         if (DBG) result = { result, debug: DBG };
         break;
+      case 'stack': {
+        const r = stack(payload.frames);
+        result = r;
+        transfer = [r.image.data.buffer];
+        break;
+      }
       case 'sharpness':
         result = sharpness(payload.image, payload.corners);
         break;
@@ -404,6 +410,96 @@ function sharpness(image, corners) {
   const v = std.data64F[0] ** 2;
   [src, roi, gray, lap, mean, std].forEach((m) => m.delete());
   return v;
+}
+
+/* ---------------- multi-frame stacking ---------------- */
+
+/**
+ * Average several frames of the same page to cut webcam grain.
+ * frames[0] is the reference (sharpest). Each other frame is first mapped onto the
+ * reference with the homography between their detected page corners, then refined
+ * with ECC (affine) on a downscaled crop of the page, and only kept if it lines up well.
+ * Returns the stacked full frame (in the reference frame's coordinates).
+ */
+function stack(frames) {
+  const refImg = frames[0].image;
+  const W = refImg.width, H = refImg.height;
+  const ref = CV.matFromImageData(refImg);
+  const acc = new CV.Mat();
+  ref.convertTo(acc, CV.CV_32FC4);
+  let used = 1;
+  const refC = frames[0].corners;
+
+  // page bounding box (inset) used for alignment
+  const xs = refC.map((p) => p.x), ys = refC.map((p) => p.y);
+  let bx0 = Math.max(0, Math.min(...xs)), bx1 = Math.min(W, Math.max(...xs));
+  let by0 = Math.max(0, Math.min(...ys)), by1 = Math.min(H, Math.max(...ys));
+  const ix = (bx1 - bx0) * 0.08, iy = (by1 - by0) * 0.08;
+  const box = new CV.Rect(Math.round(bx0 + ix), Math.round(by0 + iy), Math.max(16, Math.round(bx1 - bx0 - 2 * ix)), Math.max(16, Math.round(by1 - by0 - 2 * iy)));
+  const s = Math.min(1, 520 / Math.max(box.width, box.height));
+  const small = (m) => {
+    const roi = m.roi(box);
+    const g = new CV.Mat();
+    CV.cvtColor(roi, g, CV.COLOR_RGBA2GRAY);
+    roi.delete();
+    const r = new CV.Mat();
+    CV.resize(g, r, new CV.Size(Math.round(box.width * s), Math.round(box.height * s)), 0, 0, CV.INTER_AREA);
+    g.delete();
+    r.convertTo(r, CV.CV_32F);
+    return r;
+  };
+  const refSmall = small(ref);
+  const scores = [];
+
+  for (let i = 1; i < frames.length; i++) {
+    const img = CV.matFromImageData(frames[i].image);
+    const c = frames[i].corners;
+    const sm = CV.matFromArray(4, 1, CV.CV_32FC2, c.flatMap((p) => [p.x, p.y]));
+    const dm = CV.matFromArray(4, 1, CV.CV_32FC2, refC.flatMap((p) => [p.x, p.y]));
+    const Hm = CV.getPerspectiveTransform(sm, dm);
+    const mapped = new CV.Mat();
+    CV.warpPerspective(img, mapped, Hm, new CV.Size(W, H), CV.INTER_LINEAR, CV.BORDER_REPLICATE, new CV.Scalar());
+    [img, sm, dm, Hm].forEach((m) => m.delete());
+
+    const curSmall = small(mapped);
+    const warpM = CV.Mat.eye(2, 3, CV.CV_32F);
+    let cc = -1;
+    try {
+      const crit = new CV.TermCriteria(3 /* COUNT + EPS */, 60, 1e-4);
+      const mask = new CV.Mat();
+      cc = CV.findTransformECC(refSmall, curSmall, warpM, CV.MOTION_AFFINE, crit, mask, 5);
+      mask.delete();
+    } catch (e) {
+      cc = -1;
+    }
+    curSmall.delete();
+    scores.push(+cc.toFixed(3));
+    if (cc > 0.85) {
+      // affine found on the small crop: cur_small(A·x + t) ≈ ref_small(x)
+      // -> full-frame: A stays, t_full = t/s + b − A·b   (b = crop origin)
+      const d = warpM.data32F;
+      const a00 = d[0], a01 = d[1], t0 = d[2], a10 = d[3], a11 = d[4], t1 = d[5];
+      const bxo = box.x, byo = box.y;
+      const full = CV.matFromArray(2, 3, CV.CV_32F, [
+        a00, a01, t0 / s + bxo - (a00 * bxo + a01 * byo),
+        a10, a11, t1 / s + byo - (a10 * bxo + a11 * byo),
+      ]);
+      const aligned = new CV.Mat();
+      CV.warpAffine(mapped, aligned, full, new CV.Size(W, H), CV.INTER_LINEAR + CV.WARP_INVERSE_MAP, CV.BORDER_REPLICATE, new CV.Scalar());
+      const f32 = new CV.Mat();
+      aligned.convertTo(f32, CV.CV_32FC4);
+      CV.add(acc, f32, acc);
+      used++;
+      [full, aligned, f32].forEach((m) => m.delete());
+    }
+    warpM.delete();
+    mapped.delete();
+  }
+  const out = new CV.Mat();
+  acc.convertTo(out, CV.CV_8UC4, 1 / used);
+  const res = toImageData(out);
+  [ref, acc, refSmall, out].forEach((m) => m.delete());
+  return { image: res, used, scores };
 }
 
 /* ---------------- warp ---------------- */
