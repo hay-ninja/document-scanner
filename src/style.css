@@ -153,18 +153,6 @@ kbd {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.18);
 }
 .stage { z-index: 6; }
-.scan-fx {
-  position: fixed; inset: 0; z-index: 5; background: #fff;
-  transition: background-color 0.12s linear;
-  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 7vh;
-}
-.scan-fx-panel {
-  background: rgba(0, 0, 0, 0.55); color: #fff; border-radius: 18px; padding: 14px 22px 16px;
-  min-width: min(420px, 90vw); text-align: center; backdrop-filter: blur(8px);
-}
-.scan-fx-text { font-size: 20px; font-weight: 650; margin-bottom: 10px; }
-.scan-fx-bar { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.25); overflow: hidden; }
-.scan-fx-bar > div { height: 100%; width: 0; background: #fff; border-radius: 999px; transition: width 0.15s linear; }
 .mirror { position: absolute; inset: 0; }
 .mirror.mirrored { transform: scaleX(-1); }
 .mirror video, .mirror canvas {

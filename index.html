@@ -7,11 +7,6 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   </head>
   <body>
-    <div id="scanFx" class="scan-fx hidden" aria-live="polite">
-      <div class="scan-fx-panel">
-        <div id="scanFxText" class="scan-fx-text">Scanning — hold still</div>
-        <div class="scan-fx-bar"><div id="scanFxBar"></div></div>
-      </div>
     </div>
     <main id="live" class="live">
       <div class="stage-wrap">
@@ -57,9 +52,9 @@
 
         <section class="card capture-card">
           <div class="card-title">Capture</div>
-          <button id="captureBtn" class="btn primary big">Scan now <kbd>Space</kbd></button>
-          <label class="switch"><input type="checkbox" id="autoChk" /><span class="track"></span>Auto-scan when held still <kbd>A</kbd></label>
-          <label class="switch" title="Flashes the screen, then captures several frames and merges them for a cleaner scan. Shift+Space skips it."><input type="checkbox" id="flashChk" /><span class="track"></span>Flash scan + merge frames</label>
+          <button id="captureBtn" class="btn primary big">Capture now <kbd>Space</kbd></button>
+          <label class="switch"><input type="checkbox" id="autoChk" /><span class="track"></span>Auto-capture when page found <kbd>A</kbd></label>
+          <label class="switch" title="Merges a few video frames into one image to cut webcam grain"><input type="checkbox" id="mergeChk" /><span class="track"></span>Merge frames (less grain)</label>
         </section>
 
         <section class="card light-card">
@@ -173,8 +168,7 @@
         <h3 class="keys-title">Keyboard shortcuts</h3>
         <table class="keys">
           <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>Single / Multi-page / Custom area</td></tr>
-          <tr><td><kbd>Space</kbd></td><td>Scan now (flash scan)</td></tr>
-          <tr><td><kbd>Shift</kbd>+<kbd>Space</kbd></td><td>Quick capture (no flash, single frame burst)</td></tr>
+          <tr><td><kbd>Space</kbd></td><td>Capture now</td></tr>
           <tr><td><kbd>Enter</kbd></td><td>Save · finish multi-page · capture custom area</td></tr>
           <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>Copy the page you're reviewing</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>Back / discard / clear selection</td></tr>
@@ -184,7 +178,7 @@
           <tr><td><kbd>C</kbd></td><td>Adjust corners</td></tr>
           <tr><td><kbd>Del</kbd></td><td>Delete page (multi-page review)</td></tr>
           <tr><td><kbd>H</kbd></td><td>History</td></tr>
-          <tr><td><kbd>A</kbd></td><td>Toggle auto-scan</td></tr>
+          <tr><td><kbd>A</kbd></td><td>Toggle auto-capture</td></tr>
           <tr><td><kbd>O</kbd></td><td>Camera on / off</td></tr>
         </table>
       </div>

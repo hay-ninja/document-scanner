@@ -48,7 +48,7 @@ npm start
 ## Tips
 
 - **Distance:** hold the page about 35–50 cm from the screen, so it fills about 70–80% of the view with all four corners visible. Most laptop webcams are fixed-focus and blur anything closer.
-- **Steadiness:** rest your elbows on the desk. Capture takes a short burst of frames and keeps the sharpest.
+- **Steadiness:** you don't need to hold perfectly still. Capture takes a quick burst of frames, keeps the sharpest, and merges the rest.
 - **Washed out:** lower **Brightness** or the camera **Exposure** (in the Camera card, if your webcam supports it), or tilt the page to move the glare.
 - **Pencil:** raise **Ink darkness** in the review screen.
 - **Much sharper scans:** use your phone as the webcam (Windows Phone Link → "Use as a connected camera", or Camo / DroidCam) and pick it from the Camera dropdown.
@@ -60,7 +60,7 @@ npm start
   - **Detection**: three contour passes (edges, bright region, adaptive threshold) plus a straight-line pass (Hough lines combined into quads).
     Every candidate is scored by how much of its outline sits on a real edge with brighter paper inside than outside.
     That keeps it working when fingers cover an edge, the paper has a torn spiral edge, or the background is bright.
-  - **Flash scan**: once the page has been held within about 3% of the frame for 1.2 s, the screen flashes colours while it tracks the page (cancelling if it moves). It then turns white so exposure settles, grabs 6 frames, and merges the sharpest 4: each is aligned by corner homography plus ECC refinement, then averaged to cut webcam grain. `Shift+Space` is a quick capture without the flash.
+  - **Auto-capture**: as soon as the page has been found for about half a second (moving within about 10% of the frame is fine), it grabs the next few video frames back to back. It keeps the sharpest and merges up to 3 that agree on the page position (corner homography plus ECC alignment, then averaged) to cut webcam grain. If the page left the frame mid-burst, nothing is saved.
   - **Warp**: a perspective transform to a flat rectangle, upscaled to about 2200 px.
   - **Magic color**: removes colour noise, divides out the estimated paper background so the paper turns uniformly white, then applies an ink-darkness tone curve, boosts real colour, and sharpens.
 - **pdf-lib** builds the PDFs. **tesseract.js** does the OCR (English). Its language data downloads once from a CDN, then gets cached.
