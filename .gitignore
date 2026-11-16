@@ -1,0 +1,8 @@
+node_modules/
+dist/
+public/vendor/
+*.log
+.DS_Store
+# never commit scans
+*.pdf
+scans/
