@@ -289,6 +289,34 @@ function onVideoSize() {
 video.addEventListener('loadedmetadata', onVideoSize);
 video.addEventListener('resize', onVideoSize);
 
+let cameraOn = true;
+
+function setCameraButton() {
+  $('#camToggle').innerHTML = cameraOn ? 'Turn camera off <kbd>O</kbd>' : 'Turn camera on <kbd>O</kbd>';
+  $('#camToggle').classList.toggle('primary', !cameraOn);
+}
+
+async function toggleCamera(on = !cameraOn) {
+  cameraOn = on;
+  setCameraButton();
+  if (!on) {
+    camera.stop();
+    video.srcObject = null;
+    live.quad = live.raw = live.anchor = null;
+    live.progress = 0;
+    camMsg.classList.remove('hidden');
+    camMsg.innerHTML = '<div>Camera is off<br><span class="small">Click here or press O to turn it back on</span></div>';
+    $('#camRes').textContent = '';
+    return;
+  }
+  await startCamera(settings.deviceId || undefined);
+}
+
+$('#camToggle').addEventListener('click', () => toggleCamera());
+camMsg.addEventListener('click', () => {
+  if (!cameraOn) toggleCamera(true);
+});
+
 async function startCamera(deviceId?: string) {
   camMsg.classList.remove('hidden');
   camMsg.textContent = 'Starting camera…';
@@ -1539,6 +1567,7 @@ document.addEventListener('keydown', (e) => {
       renderStrip();
     }
   } else if (lower === 'h') openHistory();
+  else if (lower === 'o') toggleCamera();
   else if (lower === 'a') {
     settings.autoCapture = !settings.autoCapture;
     saveSettings();
