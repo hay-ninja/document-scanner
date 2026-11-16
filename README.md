@@ -31,6 +31,7 @@ npm start
 - **Filters** (`F`): Magic color (default, keeps pen and highlighter colors), Grayscale, B&W, Original
 - **Rotate** (`R` / `Shift+R`)
 - **Adjust corners** (`C`): drag the corners with a magnifier, then `Enter` to apply
+- **Copy image** (`Ctrl+C`): copies the page as a PNG, ready to paste anywhere. Every page in the multi-page strip and in History has its own Copy button too.
 - **Save** (`Enter`): choose PDF / JPG / PNG. A Save-as dialog opens in **Downloads** by default.
   Multi-page JPG/PNG asks for a folder.
 - **Searchable text (OCR)**: adds an invisible text layer to PDFs so you can search and copy from them.

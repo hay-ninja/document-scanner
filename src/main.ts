@@ -3,7 +3,7 @@ import { Camera } from './camera';
 import { cvCall, cvReady } from './cv';
 import * as history from './history';
 import { compact, fullQuad, invalidateWarp, makeThumb, newPage, renderPage, toOutPages } from './pages';
-import { defaultName, pickTarget, writeOutput } from './save';
+import { canvasToBlob, defaultName, pickTarget, writeOutput } from './save';
 import { saveSettings, settings } from './settings';
 import { FILTERS, type FilterName, type Format, type Mode, type OutPage, type Page, type Pt, type Quad, type Rotation } from './types';
 
@@ -95,9 +95,9 @@ const review = {
 /* Small UI helpers                                                    */
 /* ------------------------------------------------------------------ */
 
-function toast(msg: string, error = false) {
+function toast(msg: string, error: boolean | 'ok' = false) {
   const el = document.createElement('div');
-  el.className = 'toast' + (error ? ' error' : '');
+  el.className = 'toast' + (error === 'ok' ? ' ok' : error ? ' error' : '');
   el.textContent = msg;
   $('#toasts').appendChild(el);
   setTimeout(() => el.remove(), error ? 6000 : 3200);
@@ -115,6 +115,25 @@ function hideBusy() {
 
 function anyPanelOpen() {
   return !historyPanel.classList.contains('hidden') || !helpPanel.classList.contains('hidden');
+}
+
+/**
+ * Copy an image to the clipboard as PNG. The ClipboardItem is created synchronously
+ * (with a promised blob) so the click / keypress still counts as the user gesture.
+ */
+function copyImage(getCanvas: () => HTMLCanvasElement | Promise<HTMLCanvasElement>, label: string) {
+  const CI = (window as any).ClipboardItem;
+  if (!CI || !navigator.clipboard?.write) {
+    toast('Copying images needs Chrome or Edge', true);
+    return;
+  }
+  const blob = Promise.resolve()
+    .then(getCanvas)
+    .then((c) => canvasToBlob(c, 'image/png'));
+  navigator.clipboard
+    .write([new CI({ 'image/png': blob })])
+    .then(() => toast(`${label} copied — paste it anywhere with Ctrl+V`, 'ok'))
+    .catch((err: any) => toast(`Copy failed: ${err?.message || err}`, true));
 }
 
 function doFlash() {
@@ -225,10 +244,17 @@ document.addEventListener('change', (e) => {
 /* Modes                                                               */
 /* ------------------------------------------------------------------ */
 
+const MODE_DESC: Record<Mode, string> = {
+  single: 'Hold one page up to the camera. It captures by itself once you hold still, then you can copy or save it.',
+  multi: 'Scan several pages in a row: each is captured when still, then swap in the next. Copy pages one by one, or finish to save them together.',
+  area: 'Drag a box over the camera view to scan just that region (resize from its corners), then press Enter.',
+};
+
 function setMode(m: Mode) {
   if (state.view !== 'live') return;
   state.mode = m;
   for (const b of $$('#modes button')) b.classList.toggle('active', b.dataset.mode === m);
+  $('#modeDesc').textContent = MODE_DESC[m];
   multiBar.classList.toggle('hidden', m !== 'multi');
   liveEl.classList.toggle('has-strip', m === 'multi');
   stage.classList.toggle('area-mode', m === 'area');
@@ -592,15 +618,26 @@ function renderStrip() {
     num.className = 'num';
     num.textContent = String(i + 1);
     el.appendChild(num);
+    const btns = document.createElement('div');
+    btns.className = 'tbtns';
+    const copy = document.createElement('button');
+    copy.className = 'tbtn copy';
+    copy.textContent = 'Copy';
+    copy.title = `Copy page ${i + 1} to the clipboard`;
+    copy.onclick = (e) => {
+      e.stopPropagation();
+      copyImage(() => p.result ?? renderPage(p), `Page ${i + 1}`);
+    };
     const del = document.createElement('button');
-    del.className = 'del';
+    del.className = 'tbtn';
     del.textContent = '×';
     del.title = 'Delete page';
     del.onclick = (e) => {
       e.stopPropagation();
       deletePage(i);
     };
-    el.appendChild(del);
+    btns.append(copy, del);
+    el.appendChild(btns);
     el.onclick = () => openReview(p, 'multi');
     el.addEventListener('dragstart', (e) => {
       dragFrom = i;
@@ -620,7 +657,7 @@ function renderStrip() {
     strip.appendChild(el);
   });
   const n = state.pages.length;
-  pageCount.textContent = n ? `${n} page${n > 1 ? 's' : ''}` : 'No pages yet';
+  pageCount.textContent = String(n);
   multiSave.disabled = n === 0;
   $<HTMLButtonElement>('#multiClear').disabled = n === 0;
 }
@@ -642,7 +679,7 @@ $('#multiClear').addEventListener('click', async () => {
   state.retakeIndex = null;
   renderStrip();
   toast('Cleared — the pages are still in History');
-  if (out.length) await history.add(out, { name: defaultName(), saved: false, thumb: makeThumb(out[0].canvas, 140) });
+  if (out.length) await addHistory(out, { name: defaultName(), saved: false, thumb: makeThumb(out[0].canvas, 140) });
 });
 
 /* ------------------------------------------------------------------ */
@@ -657,12 +694,21 @@ function openReview(page: Page, kind: 'single' | 'multi') {
   reviewEl.classList.remove('hidden');
   cornerCanvas.classList.add('hidden');
   reviewCanvas.classList.remove('hidden');
+  $('#cornerTip').classList.add('hidden');
   cornersBtn.innerHTML = 'Adjust corners <kbd>C</kbd>';
   saveGroup.classList.toggle('hidden', kind !== 'single');
+  const pageNav = $('#pageNav');
+  pageNav.classList.toggle('hidden', kind !== 'multi');
   if (kind === 'single') {
     reviewTitle.textContent = 'Review scan';
+    $('#copyBtn').innerHTML = 'Copy image <kbd>Ctrl+C</kbd>';
   } else {
-    reviewTitle.textContent = `Page ${state.pages.indexOf(page) + 1} of ${state.pages.length}`;
+    const i = state.pages.indexOf(page);
+    reviewTitle.textContent = `Page ${i + 1}`;
+    $('#pageNavText').textContent = `${i + 1} / ${state.pages.length}`;
+    $<HTMLButtonElement>('#prevPage').disabled = i <= 0;
+    $<HTMLButtonElement>('#nextPage').disabled = i >= state.pages.length - 1;
+    $('#copyBtn').innerHTML = `Copy page ${i + 1} <kbd>Ctrl+C</kbd>`;
   }
   // clear previous image so stale content isn't shown
   reviewCanvas.width = 10;
@@ -682,15 +728,35 @@ function buildActions() {
     reviewActions.appendChild(b);
   };
   if (review.kind === 'single') {
-    add('Save <kbd>Enter</kbd>', 'primary', () => saveSingle());
     add('Retake', '', () => retakeSingle());
-    add('Discard <kbd>Esc</kbd>', '', () => discardSingle());
+    add('Discard <kbd>Esc</kbd>', 'danger', () => discardSingle());
   } else {
-    add('Done <kbd>Enter</kbd>', 'primary', () => closeReview());
+    add('Back to scanning <kbd>Enter</kbd>', 'primary', () => closeReview());
     add('Retake this page', '', () => retakeMultiPage());
     add('Delete page <kbd>Del</kbd>', 'danger', () => deleteReviewedPage());
   }
 }
+
+function copyReviewed() {
+  const page = review.page;
+  if (!page || review.editing) return;
+  const label = review.kind === 'multi' ? `Page ${state.pages.indexOf(page) + 1}` : 'Scan';
+  copyImage(() => renderPage(page), label);
+}
+
+function gotoPage(delta: number) {
+  const page = review.page;
+  if (!page || review.kind !== 'multi' || review.editing) return;
+  const next = state.pages[state.pages.indexOf(page) + delta];
+  if (!next) return;
+  closeReview();
+  openReview(next, 'multi');
+}
+
+$('#copyBtn').addEventListener('click', () => copyReviewed());
+$('#saveBtn').addEventListener('click', () => saveSingle());
+$('#prevPage').addEventListener('click', () => gotoPage(-1));
+$('#nextPage').addEventListener('click', () => gotoPage(1));
 
 function renderFilterChips() {
   const box = $('#filterChips');
@@ -778,7 +844,7 @@ async function discardSingle() {
   rearm(false);
   if (page?.result) {
     const out: OutPage[] = [{ canvas: page.result, bw: page.filter === 'bw' }];
-    await history.add(out, { name: defaultName(), saved: false, thumb: makeThumb(page.result, 140) });
+    await addHistory(out, { name: defaultName(), saved: false, thumb: makeThumb(page.result, 140) });
   }
 }
 
@@ -825,6 +891,7 @@ function toggleCorners(cancel = false) {
     reviewCanvas.classList.add('hidden');
     cornerCanvas.classList.remove('hidden');
     cornersBtn.innerHTML = 'Apply corners <kbd>Enter</kbd>';
+    $('#cornerTip').classList.remove('hidden');
     drawCorners();
   } else {
     review.editing = false;
@@ -835,6 +902,7 @@ function toggleCorners(cancel = false) {
     cornerCanvas.classList.add('hidden');
     reviewCanvas.classList.remove('hidden');
     cornersBtn.innerHTML = 'Adjust corners <kbd>C</kbd>';
+    $('#cornerTip').classList.add('hidden');
     refreshReview();
   }
 }
@@ -986,7 +1054,7 @@ async function saveSingle() {
   toast(`Saved ${target.label}`);
   closeReview();
   rearm(false);
-  await history.add(out, { name: target.label, saved: true, thumb: makeThumb(out[0].canvas, 140) });
+  await addHistory(out, { name: target.label, saved: true, thumb: makeThumb(out[0].canvas, 140) });
 }
 
 async function saveMulti() {
@@ -1002,12 +1070,24 @@ async function saveMulti() {
   state.retakeIndex = null;
   renderStrip();
   rearm(false);
-  await history.add(out, { name: target.label, saved: true, thumb: makeThumb(out[0].canvas, 140) });
+  await addHistory(out, { name: target.label, saved: true, thumb: makeThumb(out[0].canvas, 140) });
 }
 
 /* ------------------------------------------------------------------ */
 /* History                                                             */
 /* ------------------------------------------------------------------ */
+
+// small cache so copying several pages of one scan doesn't re-decode it each time
+let historyCache: { id: string; pages: Promise<OutPage[]> } | null = null;
+function historyPages(id: string): Promise<OutPage[]> {
+  if (historyCache?.id !== id) historyCache = { id, pages: history.loadPages(id) };
+  return historyCache.pages;
+}
+
+async function addHistory(...args: Parameters<typeof history.add>) {
+  await history.add(...args);
+  if (!historyPanel.classList.contains('hidden')) renderHistory();
+}
 
 async function openHistory() {
   if (state.view !== 'live') return;
@@ -1040,9 +1120,24 @@ async function renderHistory() {
     const sub = document.createElement('div');
     sub.className = 'muted small';
     sub.textContent = `${new Date(e.date).toLocaleString()} · ${e.pages} page${e.pages > 1 ? 's' : ''}`;
-    meta.append(name, sub);
+    const copies = document.createElement('div');
+    copies.className = 'copies';
+    const copyLabel = document.createElement('span');
+    copyLabel.className = 'muted small';
+    copyLabel.textContent = 'Copy:';
+    copies.appendChild(copyLabel);
+    for (let i = 0; i < e.pages; i++) {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.textContent = e.pages === 1 ? 'Image' : `Page ${i + 1}`;
+      b.title = 'Copy to clipboard';
+      b.onclick = () =>
+        copyImage(async () => (await historyPages(e.id))[i].canvas, e.pages === 1 ? 'Scan' : `Page ${i + 1}`);
+      copies.appendChild(b);
+    }
+    meta.append(name, sub, copies);
     const actions = document.createElement('div');
-    actions.className = 'row';
+    actions.className = 'acts';
     const mk = (label: string, cls: string, fn: () => void) => {
       const b = document.createElement('button');
       b.className = 'btn ' + cls;
@@ -1108,6 +1203,12 @@ document.addEventListener('keydown', (e) => {
   const t = e.target as HTMLElement;
   if (t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
   if (t instanceof HTMLInputElement && !['checkbox', 'range'].includes(t.type)) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && state.view === 'review' && !anyPanelOpen() && !state.busy) {
+    if (window.getSelection()?.toString()) return; // let normal text copy through
+    e.preventDefault();
+    copyReviewed();
+    return;
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (state.busy) {
     e.preventDefault();
@@ -1135,6 +1236,8 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'Escape') review.kind === 'single' ? discardSingle() : closeReview();
     else if (lower === 'r') rotate(e.shiftKey ? -90 : 90);
     else if (lower === 'f') cycleFilter(e.shiftKey ? -1 : 1);
+    else if (k === 'ArrowLeft') gotoPage(-1);
+    else if (k === 'ArrowRight') gotoPage(1);
     else if (lower === 'c') toggleCorners();
     else if ((k === 'Delete' || k === 'Backspace') && review.kind === 'multi') deleteReviewedPage();
     return;
